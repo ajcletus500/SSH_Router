@@ -1,13 +1,14 @@
-import paramiko
+#!/usr/bin/env python
+
+import telnetlib
 import threading
 import os.path
 import subprocess
 import time
-import re
-
 import sys
 
 
+#Checking IP address validity
 def ip_validity():
     check=False
     global ip_list
@@ -66,24 +67,22 @@ def ip_validity():
                 check2 = False
                 break
         #print ('a')
-        if check2:
+        if check2==True:
             print('\n* All devices are reachable. Waiting for username/password file...\n')
             break
 
-        elif check2:
+        elif check2==False:
             print("* Please re-check IP address list or device.\n")
             ip_validity()
-            break
 
 
-# Checking user file validity
+#Checking the username password file validity
 def user_is_valid():
     global user_file
 
     while True:
 
         user_file = input("# Enter user/pass file name and extension: ")
-
 
         # Changing output messages
         if os.path.isfile(user_file) == True:
@@ -95,58 +94,52 @@ def user_is_valid():
             continue
 
 
-# Checking command file validity
+#Checking command file validity
 def cmd_is_valid():
     global cmd_file
-
+    
     while True:
-
-        cmd_file = input("# Enter command file name and extension: ")
-
-
-        # Changing output messages
+        cmd_file = input("Enter command file name and extension: ")
+        
+        #Changing exception message
         if os.path.isfile(cmd_file) == True:
-            print("\n* Sending command(s) to device(s)...\n")
+            print ("\nSending command(s) to device(s)...\n")
             break
-
+        
         else:
-            print("\n* File %s does not exist! Please check and try again!\n" % cmd_file)
+            print ("\nFile %s does not exist! Please check and try again!\n" % cmd_file)
             continue
 
-
-
 try:
-
+    #Calling IP validity function
     ip_validity()
-
+    
 except KeyboardInterrupt:
-    print("\n\n* Program aborted by user. Exiting...\n")
+    print( "\n\nProgram aborted by user. Exiting...\n")
     sys.exit()
 
-
 try:
-
+    # Calling user file validity function
     user_is_valid()
 
 except KeyboardInterrupt:
     print("\n\n* Program aborted by user. Exiting...\n")
     sys.exit()
 
-
 try:
-
+    #Calling command file validity function
     cmd_is_valid()
-
+    
 except KeyboardInterrupt:
-    print("\n\n* Program aborted by user. Exiting...\n")
+    print ("\n\nProgram aborted by user. Exiting...\n")
     sys.exit()
 
-#########################################################################################
-# Open SSHv2 connection to devices
-def open_ssh_conn(ip):
-    # Change exception message
+
+#Open telnet connection to devices
+def open_telnet_conn(ip):
+    #Change exception message
     try:
-        # Define SSH parameters
+        #Define telnet parameters
         selected_user_file = open(user_file, 'r')
 
         selected_user_file.seek(0)
@@ -154,71 +147,69 @@ def open_ssh_conn(ip):
         username, password= selected_user_file.readlines()[0].split(',')
         password=password.strip('\n')
 
-        #print(username,password)
+        #Telnet port (default is 23, anyway)
+        port = 23
+        
+        connection_timeout = 5
+        
+        reading_timeout = 5
+        
+        #Logging into device
+        connection = telnetlib.Telnet(ip, port, connection_timeout)
+        
+        #Waiting to be asked for an username
+        router_output = connection.read_until("Username:", reading_timeout)
 
-        # Logging into device
-        session = paramiko.SSHClient()
+        connection.write(username + "\n")
+        
+        #Waiting to be asked for a password
+        router_output = connection.read_until("Password:", reading_timeout)
 
-        session.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        # Connect to the device using username and password
-        session.connect(ip, username=username, password=password)
-
-        # Start an interactive shell session on the router
-        connection = session.invoke_shell()
-
-        # Setting terminal length for entire output - disable pagination
-        connection.send("terminal length 0\n")
+        connection.write(password + "\n")
+        time.sleep(1)	
+        
+        #Setting terminal length for the entire output - disabling pagination
+        connection.write("terminal length 0\n")
         time.sleep(1)
-
-        # Entering global config mode
-        connection.send("\n")
-        connection.send("configure terminal\n")
+        
+        #Entering global config mode
+        connection.write("\n")
+        connection.write("configure terminal\n")
         time.sleep(1)
-
-        # Open user selected file for reading
+        
         selected_cmd_file = open(cmd_file, 'r')
-
-        # Starting from the beginning of the file
+            
         selected_cmd_file.seek(0)
-
+        
+        #Writing each line in the file to the device
         for each_line in selected_cmd_file.readlines():
-            connection.send(each_line + '\n')
-            time.sleep(2)
-
-        selected_user_file.close()
-
+            connection.write(each_line + '\n')
+            time.sleep(1)
+    
+        #Closing the file
         selected_cmd_file.close()
+        
+        #router_output = connection.read_very_eager()
+        #print router_output
+        
+        #Closing the connection
+        connection.close()
+        
+    except IOError:
+        print("Input parameter error! Please check username, password and file name.")
 
-        # Checking command output for IOS syntax errors
-        router_output = connection.recv(65535)
-
-        if re.search(" Invalid input detected at", router_output.decode('utf-8')):
-            print("* There was at least one IOS syntax error on device %s" % ip)
-
-        else:
-            print("\nDONE for device %s" % ip)
-
-        # Closing the connection
-        session.close()
-
-    except paramiko.AuthenticationException:
-        print("* Invalid username or password. \n* Please check the username/password file or the device configuration!")
-        print("* Closing program...\n")
-
-
-
-# Creating threads
+  
+#Creating threads
 def create_threads():
     threads = []
     for ip in ip_list:
-        th = threading.Thread(target=open_ssh_conn, args=(ip,))  # args is a tuple with a single element
+        th = threading.Thread(target = open_telnet_conn, args = (ip,))
         th.start()
         threads.append(th)
-
+        
     for th in threads:
         th.join()
 
-
-# Calling threads creation function
+#Calling threads creation function
 create_threads()
+
